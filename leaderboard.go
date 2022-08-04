@@ -26,11 +26,12 @@ type Leaderboard interface {
 }
 
 type leaderboard struct {
-	redisClient    *redis.Client
-	name           string
-	rankSet        string
-	memberScoreSet string
-	opts           *Options
+	redisClient     *redis.Client
+	name            string
+	rankSet         string
+	memberScoreSet  string
+	addMemberScript *redis.Script
+	opts            *Options
 }
 
 func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leaderboard {
@@ -43,29 +44,36 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	rankSet := generateRankSetName(name)
 	memberScoreSet := genenrateMemScoreSetName(name)
 
-	addMember := redis.NewScript(`
-local key = KEYS[1]
-local member_id = ARGV[1]
-local change = ARGV[2]
-
-local value = redis.call("GET", key)
-if not value then
-  value = 0
-end
-
-value = value + change
-redis.call("SET", key, value)
-
-return value
-`)
-
-	return &leaderboard{
+	lb := &leaderboard{
 		redisClient:    redisClient,
 		name:           name,
 		rankSet:        rankSet,
 		memberScoreSet: memberScoreSet,
 		opts:           opts,
 	}
+
+	lb.addMemberScript = redis.NewScript(`
+local key = KEYS[1]
+local member_id = ARGV[1]
+local new_score = ARGV[2]
+
+local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
+local rank_set = "goleaderboard:" .. key .. ":rank_set"
+
+local old_score = redis.call("ZSCORE", member_score_set, member_id)
+	
+redis.call("ZADD", rank_set, new_score, new_score)
+redis.call("ZADD", member_score_set, new_score, member_id)
+
+local count_member_in_old_score = redis.call("ZCOUNT", member_score_set, old_score, old_score)
+if count_member_in_old_score == 0 then
+	redis.call("ZREM", rank_set, old_score)
+end
+
+return 1
+`)
+
+	return lb
 }
 
 func generateRankSetName(name string) string {
@@ -77,30 +85,7 @@ func genenrateMemScoreSetName(name string) string {
 }
 
 func (l *leaderboard) AddMember(ctx context.Context, member *Member) error {
-	pipeline := l.redisClient.Pipeline()
-	oldScore := pipeline.ZScore(ctx, l.memberScoreSet, fmt.Sprintf("%v", member.ID))
-
-	pipeline.ZAdd(ctx, l.rankSet, &redis.Z{
-		Score:  float64(member.Score),
-		Member: member.Score,
-	})
-	pipeline.ZAdd(ctx, l.memberScoreSet, &redis.Z{
-		Score:  float64(member.Score),
-		Member: member.ID,
-	})
-
-	minOldScoreVal := fmt.Sprintf("%f", oldScore.Val()-1)
-	oldScoreVal := fmt.Sprintf("%f", oldScore.Val())
-	countMemberWithOldScore := pipeline.ZCount(ctx, l.memberScoreSet, minOldScoreVal, oldScoreVal)
-	if countMemberWithOldScore.Val() == 0 {
-		pipeline.ZRem(ctx, l.rankSet, oldScoreVal)
-	}
-
-	if _, err := pipeline.Exec(ctx); err != nil {
-		return err
-	}
-
-	return nil
+	return l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, member.ID, member.Score).Err()
 }
 
 func (l *leaderboard) List(ctx context.Context, offset, limit int) ([]*Member, error) {
