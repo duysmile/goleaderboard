@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/duysmile/goleaderboard"
 	"github.com/go-redis/redis/v8"
@@ -16,26 +17,19 @@ func main() {
 	leaderboard := goleaderboard.NewLeaderBoard(rdb, "test", nil)
 
 	ctx := context.Background()
-	leaderboard.AddMember(ctx, &goleaderboard.Member{
-		ID:    "1",
-		Score: 1,
-	})
-	leaderboard.AddMember(ctx, &goleaderboard.Member{
-		ID:    "2",
-		Score: 2,
-	})
-	leaderboard.AddMember(ctx, &goleaderboard.Member{
-		ID:    "3",
-		Score: 2,
-	})
-	leaderboard.AddMember(ctx, &goleaderboard.Member{
-		ID:    "4",
-		Score: 3,
-	})
+	leaderboard.AddMember(ctx, "1", 1)
+	leaderboard.AddMember(ctx, "2", 2)
+	leaderboard.AddMember(ctx, "3", 2)
+	leaderboard.AddMember(ctx, "4", 3)
 
 	// change score of member "4"
-	leaderboard.AddMember(ctx, &goleaderboard.Member{
-		ID:    "4",
-		Score: 2,
-	})
+	leaderboard.AddMember(ctx, "4", 2)
+
+	// list member with rank
+	list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
+	fmt.Println("list member", list)
+
+	// get rank of member
+	rank, _ := leaderboard.GetRank(ctx, "2")
+	fmt.Println("rank of member 2", rank)
 }
