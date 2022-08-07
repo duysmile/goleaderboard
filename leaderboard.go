@@ -30,7 +30,7 @@ type Member struct {
 type Leaderboard interface {
 	AddMember(ctx context.Context, id interface{}, score int) error
 	List(ctx context.Context, offset, limit int, order Order) ([]*Member, error)
-	GetAround(ctx context.Context, member *Member) ([]*Member, error)
+	GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error)
 	GetRank(ctx context.Context, id interface{}) (int, error)
 }
 
@@ -68,90 +68,6 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	lb.getRankScript = initGetRankScript()
 
 	return lb
-}
-
-func initAddMemberScript() *redis.Script {
-	return redis.NewScript(`
-local key = KEYS[1]
-local member_id = ARGV[1]
-local new_score = ARGV[2]
-
-local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
-local rank_set = "goleaderboard:" .. key .. ":rank_set"
-
-local old_score = redis.call("ZSCORE", member_score_set, member_id)
-	
-redis.call("ZADD", rank_set, new_score, new_score)
-redis.call("ZADD", member_score_set, new_score, member_id)
-
-local count_member_in_old_score = redis.call("ZCOUNT", member_score_set, old_score, old_score)
-if count_member_in_old_score == 0 then
-	redis.call("ZREM", rank_set, old_score)
-end
-
-return 1
-`)
-}
-
-func initGetListMemberWithRankScript() *redis.Script {
-	return redis.NewScript(`
-local key = KEYS[1]
-local offset = ARGV[1]
-local limit = ARGV[2]
-local order = ARGV[3]
-
-local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
-local rank_set = "goleaderboard:" .. key .. ":rank_set"
-
-local listCmd, rankCmd
-if order == "asc" then
-	listCmd = "ZRANGE"
-else
-	listCmd = "ZREVRANGE"
-end
-
-local list_member_with_score = redis.call(listCmd, member_score_set, offset, offset + limit, "WITHSCORES")
-
-local list_member_with_rank = {}
-
-for idx,val in ipairs(list_member_with_score) do
-	table.insert(list_member_with_rank, val) 
-
-	if idx % 2 == 0 then 
-		local rank = redis.call("ZREVRANK", rank_set, val)
-		table.insert(list_member_with_rank, tostring(rank + 1))
-	end
-end
-
-return list_member_with_rank
-`)
-}
-
-func initGetRankScript() *redis.Script {
-	return redis.NewScript(`
-local key = KEYS[1]
-local id = ARGV[1]
-
-local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
-local rank_set = "goleaderboard:" .. key .. ":rank_set"
-
-local score = redis.call("ZSCORE", member_score_set, id)
-local rank = redis.call("ZREVRANK", rank_set, tostring(score))
-
-if rank == nil then
-	return redis.call("ZCOUNT", rank_set, "-inf", "+inf") + 1
-end
-
-return rank + 1
-`)
-}
-
-func generateRankSetName(name string) string {
-	return fmt.Sprintf("goleaderboard:%s:rank_set", name)
-}
-
-func generateMemScoreSetName(name string) string {
-	return fmt.Sprintf("goleaderboard:%s:member_score_set", name)
 }
 
 func (l *leaderboard) AddMember(ctx context.Context, id interface{}, score int) error {
@@ -230,8 +146,39 @@ func (l *leaderboard) List(ctx context.Context, offset, limit int, order Order) 
 	return listMember, nil
 }
 
-func (l *leaderboard) GetAround(ctx context.Context, member *Member) ([]*Member, error) {
-	panic("implement me")
+func (l *leaderboard) GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
+	rankCmd := l.redisClient.ZRevRank
+	if order == OrderAsc {
+		rankCmd = l.redisClient.ZRank
+	}
+	rank, err := rankCmd(
+		ctx,
+		generateMemScoreSetName(l.name),
+		fmt.Sprintf("%v", id),
+	).Result()
+
+	if err != nil {
+		return nil, err
+	}
+
+	total, err := l.redisClient.ZCount(
+		ctx,
+		generateMemScoreSetName(l.name),
+		"-inf",
+		"+inf",
+	).Result()
+
+	if err != nil {
+		return nil, err
+	}
+
+	start := cursorAround(
+		int(rank),
+		limit,
+		int(total),
+	)
+
+	return l.List(ctx, start, limit, order)
 }
 
 func (l *leaderboard) _GetRank(ctx context.Context, id interface{}) (int, error) {
@@ -242,7 +189,7 @@ func (l *leaderboard) _GetRank(ctx context.Context, id interface{}) (int, error)
 	).Result()
 
 	if err != nil {
-		return 0, nil
+		return 0, err
 	}
 
 	rank, err := l.redisClient.ZRevRank(
@@ -268,8 +215,114 @@ func (l *leaderboard) GetRank(ctx context.Context, id interface{}) (int, error) 
 	return int(rank), nil
 }
 
+func initAddMemberScript() *redis.Script {
+	return redis.NewScript(`
+local key = KEYS[1]
+local member_id = ARGV[1]
+local new_score = ARGV[2]
+
+local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
+local rank_set = "goleaderboard:" .. key .. ":rank_set"
+
+local old_score = redis.call("ZSCORE", member_score_set, member_id)
+	
+redis.call("ZADD", rank_set, new_score, new_score)
+redis.call("ZADD", member_score_set, new_score, member_id)
+
+local count_member_in_old_score = redis.call("ZCOUNT", member_score_set, old_score, old_score)
+if count_member_in_old_score == 0 then
+	redis.call("ZREM", rank_set, old_score)
+end
+
+return 1
+`)
+}
+
+func initGetListMemberWithRankScript() *redis.Script {
+	return redis.NewScript(`
+local key = KEYS[1]
+local offset = ARGV[1]
+local limit = ARGV[2]
+local order = ARGV[3]
+
+local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
+local rank_set = "goleaderboard:" .. key .. ":rank_set"
+
+local listCmd, rankCmd
+if order == "asc" then
+	listCmd = "ZRANGE"
+else
+	listCmd = "ZREVRANGE"
+end
+
+local list_member_with_score = redis.call(listCmd, member_score_set, offset, offset + limit - 1, "WITHSCORES")
+
+local list_member_with_rank = {}
+
+for idx,val in ipairs(list_member_with_score) do
+	table.insert(list_member_with_rank, val) 
+
+	if idx % 2 == 0 then 
+		local rank = redis.call("ZREVRANK", rank_set, val)
+		table.insert(list_member_with_rank, tostring(rank + 1))
+	end
+end
+
+return list_member_with_rank
+`)
+}
+
+func initGetRankScript() *redis.Script {
+	return redis.NewScript(`
+local key = KEYS[1]
+local id = ARGV[1]
+
+local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
+local rank_set = "goleaderboard:" .. key .. ":rank_set"
+
+local score = redis.call("ZSCORE", member_score_set, id)
+local rank = redis.call("ZREVRANK", rank_set, tostring(score))
+
+if not rank then
+	return redis.call("ZCOUNT", rank_set, "-inf", "+inf") + 1
+end
+
+return rank + 1
+`)
+}
+
+func generateRankSetName(name string) string {
+	return fmt.Sprintf("goleaderboard:%s:rank_set", name)
+}
+
+func generateMemScoreSetName(name string) string {
+	return fmt.Sprintf("goleaderboard:%s:member_score_set", name)
+}
+
 func interfaceToInt(val interface{}) int {
 	str := fmt.Sprintf("%s", val)
 	v, _ := strconv.ParseInt(str, 10, 64)
 	return int(v)
+}
+
+func maxInt(nums ...int) int {
+	if len(nums) == 0 {
+		return 0
+	}
+	max := nums[0]
+	for _, n := range nums {
+		if n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+func cursorAround(rank, limit, total int) (start int) {
+	start = maxInt(rank-maxInt(0, limit/2), 0)
+	remain := start + limit - total
+	if remain > 0 {
+		start = maxInt(0, start-remain)
+	}
+	return
 }
