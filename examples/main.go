@@ -27,7 +27,10 @@ func main() {
 
 	// list member with rank
 	list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
-	fmt.Println("list member", list)
+
+	for idx := range list {
+		fmt.Println("list member  :", list[idx].ID, list[idx].Score, list[idx].Rank)
+	}
 
 	// get rank of member
 	rank, _ := leaderboard.GetRank(ctx, "2")

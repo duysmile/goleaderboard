@@ -3,6 +3,7 @@ package goleaderboard
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -34,12 +35,13 @@ type Leaderboard interface {
 }
 
 type leaderboard struct {
-	redisClient     *redis.Client
-	name            string
-	rankSet         string
-	memberScoreSet  string
-	addMemberScript *redis.Script
-	opts            *Options
+	redisClient      *redis.Client
+	name             string
+	rankSet          string
+	memberScoreSet   string
+	addMemberScript  *redis.Script
+	listMemberScript *redis.Script
+	opts             *Options
 }
 
 func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leaderboard {
@@ -61,6 +63,7 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	}
 
 	lb.addMemberScript = initAddMemberScript()
+	lb.listMemberScript = initGetListMemberWithRankScript()
 
 	return lb
 }
@@ -88,6 +91,42 @@ return 1
 `)
 }
 
+func initGetListMemberWithRankScript() *redis.Script {
+	return redis.NewScript(`
+local key = KEYS[1]
+local offset = ARGV[1]
+local limit = ARGV[2]
+local order = ARGV[3]
+
+local member_score_set = "goleaderboard:" .. key .. ":member_score_set"
+local rank_set = "goleaderboard:" .. key .. ":rank_set"
+
+local listCmd, rankCmd
+if order == "asc" then
+	listCmd = "ZRANGE"
+	rankCmd = "ZRANK"
+else
+	listCmd = "ZREVRANGE"
+	rankCmd = "ZREVRANK"
+end
+
+local list_member_with_score = redis.call(listCmd, member_score_set, offset, offset + limit, "WITHSCORES")
+
+local list_member_with_rank = {}
+
+for idx,val in ipairs(list_member_with_score) do
+	table.insert(list_member_with_rank, val) 
+
+	if idx % 2 == 0 then 
+		local rank = redis.call(rankCmd, rank_set, val)
+		table.insert(list_member_with_rank, tostring(rank + 1))
+	end
+end
+
+return list_member_with_rank
+`)
+}
+
 func generateRankSetName(name string) string {
 	return fmt.Sprintf("goleaderboard:%s:rank_set", name)
 }
@@ -100,7 +139,7 @@ func (l *leaderboard) AddMember(ctx context.Context, id interface{}, score int) 
 	return l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, id, score).Err()
 }
 
-func (l *leaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+func (l *leaderboard) _List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
 	cmd := l.redisClient.ZRevRangeWithScores
 	if order == OrderAsc {
 		cmd = l.redisClient.ZRangeWithScores
@@ -148,6 +187,33 @@ func (l *leaderboard) List(ctx context.Context, offset, limit int, order Order) 
 			Rank:  int(uniqueScores[member.Score].Val()) + 1,
 		}
 		listMember = append(listMember, mem)
+	}
+
+	return listMember, nil
+}
+
+func (l *leaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+	listMemberRankTmp, err := l.listMemberScript.Run(ctx, l.redisClient, []string{l.name}, offset, limit, string(order)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	listMemberRank := listMemberRankTmp.([]interface{})
+	listMember := make([]*Member, len(listMemberRank)/3)
+	for idx, val := range listMemberRank {
+		if idx%3 == 1 {
+			scoreStr := fmt.Sprintf("%s", val)
+			score, _ := strconv.ParseInt(scoreStr, 10, 64)
+			listMember[idx/3].Score = int(score)
+		} else if idx%3 == 2 {
+			rankStr := fmt.Sprintf("%s", val)
+			rank, _ := strconv.ParseInt(rankStr, 10, 64)
+			listMember[idx/3].Rank = int(rank)
+		} else {
+			listMember[idx/3] = &Member{
+				ID: val,
+			}
+		}
 	}
 
 	return listMember, nil
