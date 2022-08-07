@@ -32,7 +32,7 @@ func main() {
 
 	// list member with rank
 	list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
-	print(list)
+	Print(list)
 
 	// get rank of member
 	rank, _ := leaderboard.GetRank(ctx, "P2")
@@ -40,10 +40,10 @@ func main() {
 
 	// get around a member
 	list, _ = leaderboard.GetAround(ctx, "P4", 4, goleaderboard.OrderDesc)
-	print(list)
+	Print(list)
 }
 
-func print(list []*goleaderboard.Member) {
+func Print(list []*goleaderboard.Member) {
 	fmt.Println("==== Leaderboard ====")
 	fmt.Println("# || ID || Score")
 	for idx := range list {
