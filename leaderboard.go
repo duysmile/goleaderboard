@@ -32,6 +32,7 @@ type Leaderboard interface {
 	List(ctx context.Context, offset, limit int, order Order) ([]*Member, error)
 	GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error)
 	GetRank(ctx context.Context, id interface{}) (int, error)
+	Clean(ctx context.Context) error
 }
 
 type leaderboard struct {
@@ -73,7 +74,8 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 }
 
 func (l *leaderboard) AddMember(ctx context.Context, id interface{}, score int) error {
-	return l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, id, score).Err()
+	_, err := l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, id, score).Result()
+	return err
 }
 
 func (l *leaderboard) _List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
@@ -240,6 +242,15 @@ func (l *leaderboard) GetRank(ctx context.Context, id interface{}) (int, error) 
 	return int(rank), nil
 }
 
+func (l *leaderboard) Clean(ctx context.Context) error {
+	pipeline := l.redisClient.Pipeline()
+	pipeline.Del(ctx, generateRankSetName(l.name))
+	pipeline.Del(ctx, generateMemScoreSetName(l.name))
+
+	_, err := pipeline.Exec(ctx)
+	return err
+}
+
 func initAddMemberScript() *redis.Script {
 	return redis.NewScript(`
 local key = KEYS[1]
@@ -253,6 +264,10 @@ local old_score = redis.call("ZSCORE", member_score_set, member_id)
 	
 redis.call("ZADD", rank_set, new_score, new_score)
 redis.call("ZADD", member_score_set, new_score, member_id)
+
+if old_score ~= nil then
+	return 1
+end
 
 local count_member_in_old_score = redis.call("ZCOUNT", member_score_set, old_score, old_score)
 if count_member_in_old_score == 0 then
