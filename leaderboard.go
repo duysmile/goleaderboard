@@ -47,7 +47,7 @@ type leaderboard struct {
 	opts             *Options
 }
 
-// NewLeaderBoard create a new leaderboard with specific name and configs
+// NewLeaderBoard create a new leaderboard stored in Redis with specific name and configs
 func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leaderboard {
 	if opts == nil {
 		opts = &Options{
