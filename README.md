@@ -1,4 +1,7 @@
 # goleaderboard
+[![From Vietnam with <3](https://raw.githubusercontent.com/webuild-community/badge/master/svg/love.svg)](https://webuild.community)
+[![Go Reference](https://pkg.go.dev/badge/github.com/duysmile/goleaderboard)](https://pkg.go.dev/github.com/duysmile/goleaderboard)
+
 Package to make your own leaderboard in simple way
 
 ## What is it?
