@@ -47,6 +47,7 @@ type leaderboard struct {
 	opts             *Options
 }
 
+// NewLeaderBoard create a new leaderboard with specific name and configs
 func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leaderboard {
 	if opts == nil {
 		opts = &Options{
@@ -73,6 +74,7 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	return lb
 }
 
+// AddMember add a member with score to leaderboard
 func (l *leaderboard) AddMember(ctx context.Context, id interface{}, score int) error {
 	_, err := l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, id, score).Result()
 	return err
@@ -127,6 +129,7 @@ func (l *leaderboard) _List(ctx context.Context, offset, limit int, order Order)
 	return listMember, nil
 }
 
+// List get list member with offset, limit and order in leaderboard
 func (l *leaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
 	listMemberRankTmp, err := l.listMemberScript.Run(ctx, l.redisClient, []string{l.name}, offset, limit, string(order)).Result()
 	if err != nil {
@@ -185,6 +188,7 @@ func (l *leaderboard) _GetAround(ctx context.Context, id interface{}, limit int,
 	return l.List(ctx, start, limit, order)
 }
 
+// GetAround get list member around another member with limit and order
 func (l *leaderboard) GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
 	listMemberRankTmp, err := l.getAroundScript.Run(ctx, l.redisClient, []string{l.name}, id, limit, string(order)).Result()
 	if err != nil {
@@ -232,6 +236,7 @@ func (l *leaderboard) _GetRank(ctx context.Context, id interface{}) (int, error)
 	return int(rank) + 1, nil
 }
 
+// GetRank get rank of a member
 func (l *leaderboard) GetRank(ctx context.Context, id interface{}) (int, error) {
 	rankData, err := l.getRankScript.Run(ctx, l.redisClient, []string{l.name}, id).Result()
 	if err != nil {
@@ -242,6 +247,7 @@ func (l *leaderboard) GetRank(ctx context.Context, id interface{}) (int, error) 
 	return int(rank), nil
 }
 
+// Clean clear all data of leaderboard in redis
 func (l *leaderboard) Clean(ctx context.Context) error {
 	pipeline := l.redisClient.Pipeline()
 	pipeline.Del(ctx, generateRankSetName(l.name))
