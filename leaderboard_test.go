@@ -75,6 +75,28 @@ func addMember(t *testing.T, ctx context.Context, leaderboard Leaderboard, id in
 	}
 }
 
+func getAround(
+	t *testing.T,
+	ctx context.Context,
+	leaderboard Leaderboard,
+	id interface{},
+	limit int,
+	expected int,
+) []*Member {
+	list, err := leaderboard.GetAround(ctx, id, limit, OrderDesc)
+	if err != nil {
+		t.Error("failed to get around", err.Error())
+		return nil
+	}
+
+	if len(list) != expected {
+		t.Errorf("Error in get around\nExpected: %v\nReceived: %v", limit, len(list))
+		return nil
+	}
+
+	return list
+}
+
 func TestAddMember(t *testing.T) {
 	setup(t)
 	defer teardown(t)
@@ -138,4 +160,43 @@ func TestSameRankingMember(t *testing.T) {
 
 	getRank(t, ctx, leaderboard, player1, 1)
 	getRank(t, ctx, leaderboard, player2, 1)
+}
+
+func TestGetAround(t *testing.T) {
+	setup(t)
+	defer teardown(t)
+
+	ctx := context.Background()
+	numberOfMember := 10
+	leaderboard := initLeaderboard(t, ctx, numberOfMember)
+	defer clean(t, ctx, leaderboard)
+
+	player := "P4"
+	limit := 1
+	list := getAround(t, ctx, leaderboard, player, limit, limit)
+	if list != nil && list[0].ID != player {
+		t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[0].ID)
+		return
+	}
+
+	limit = 6
+	list = getAround(t, ctx, leaderboard, player, limit, limit)
+	if list != nil && list[limit/2].ID != player {
+		t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[limit/2].ID)
+		return
+	}
+
+	player = "P0"
+	list = getAround(t, ctx, leaderboard, player, limit, limit)
+	if list != nil && list[0].ID != player {
+		t.Errorf("Error in get around of member with player in top 1\nExpected: player %v\nReceived: player %v", player, list[0].ID)
+		return
+	}
+
+	player = "P9"
+	list = getAround(t, ctx, leaderboard, player, limit, limit)
+	if list != nil && list[limit-1].ID != player {
+		t.Errorf("Error in get around of member with player in top 10\nExpected: player %v\nReceived: player %v", player, list[limit-1].ID)
+		return
+	}
 }
