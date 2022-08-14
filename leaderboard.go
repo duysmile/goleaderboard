@@ -23,6 +23,12 @@ var (
 	OrderAsc  Order = "asc"
 )
 
+// Cursor mark the begin and end offset of list member in leaderboard
+type Cursor struct {
+	Begin int
+	End   int
+}
+
 // Member is a member of leaderboard.
 // It is the main object of leaderboard.
 type Member struct {
@@ -34,8 +40,8 @@ type Member struct {
 // Leaderboard is the representation of a leaderboard usage.
 type Leaderboard interface {
 	AddMember(ctx context.Context, id interface{}, score int) error
-	List(ctx context.Context, offset, limit int, order Order) ([]*Member, error)
-	GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error)
+	List(ctx context.Context, offset, limit int, order Order) ([]*Member, Cursor, error)
+	GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, Cursor, error)
 	GetRank(ctx context.Context, id interface{}) (int, error)
 	Clean(ctx context.Context) error
 }
@@ -103,7 +109,7 @@ func (l *RedisLeaderboard) AddMember(ctx context.Context, id interface{}, score 
 	return l.addMember(ctx, id, score)
 }
 
-func (l *RedisLeaderboard) listMember(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) listMember(ctx context.Context, offset, limit int, order Order) ([]*Member, Cursor, error) {
 	cmd := l.redisClient.ZRevRangeWithScores
 	if order == OrderAsc {
 		cmd = l.redisClient.ZRangeWithScores
@@ -116,7 +122,7 @@ func (l *RedisLeaderboard) listMember(ctx context.Context, offset, limit int, or
 	).Result()
 
 	if err != nil {
-		return nil, err
+		return nil, Cursor{}, err
 	}
 
 	pipeline := l.redisClient.Pipeline()
@@ -136,7 +142,7 @@ func (l *RedisLeaderboard) listMember(ctx context.Context, offset, limit int, or
 	}
 
 	if _, err := pipeline.Exec(ctx); err != nil {
-		return nil, err
+		return nil, Cursor{}, err
 	}
 
 	listMember := make([]*Member, 0, len(listMemberRedis))
@@ -149,13 +155,16 @@ func (l *RedisLeaderboard) listMember(ctx context.Context, offset, limit int, or
 		listMember = append(listMember, mem)
 	}
 
-	return listMember, nil
+	return listMember, Cursor{
+		Begin: offset,
+		End:   offset + len(listMember),
+	}, nil
 }
 
-func (l *RedisLeaderboard) listMemberSameRank(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) listMemberSameRank(ctx context.Context, offset, limit int, order Order) ([]*Member, Cursor, error) {
 	listMemberRankTmp, err := l.listMemberScript.Run(ctx, l.redisClient, []string{l.name}, offset, limit, string(order)).Result()
 	if err != nil {
-		return nil, err
+		return nil, Cursor{}, err
 	}
 
 	listMemberRank := listMemberRankTmp.([]interface{})
@@ -171,11 +180,14 @@ func (l *RedisLeaderboard) listMemberSameRank(ctx context.Context, offset, limit
 			}
 		}
 	}
-	return listMember, nil
+	return listMember, Cursor{
+		Begin: offset,
+		End:   offset + len(listMember),
+	}, nil
 }
 
 // List get list member with offset, limit and order in leaderboard
-func (l *RedisLeaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, Cursor, error) {
 	if l.opts.AllowSameRank {
 		return l.listMemberSameRank(ctx, offset, limit, order)
 	}
@@ -183,7 +195,7 @@ func (l *RedisLeaderboard) List(ctx context.Context, offset, limit int, order Or
 	return l.listMember(ctx, offset, limit, order)
 }
 
-func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, Cursor, error) {
 	rankCmd := l.redisClient.ZRevRank
 	if order == OrderAsc {
 		rankCmd = l.redisClient.ZRank
@@ -195,7 +207,7 @@ func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit 
 	).Result()
 
 	if err != nil {
-		return nil, err
+		return nil, Cursor{}, err
 	}
 
 	total, err := l.redisClient.ZCount(
@@ -206,7 +218,7 @@ func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit 
 	).Result()
 
 	if err != nil {
-		return nil, err
+		return nil, Cursor{}, err
 	}
 
 	start := cursorAround(
@@ -218,11 +230,27 @@ func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit 
 	return l.List(ctx, start, limit, order)
 }
 
-func (l *RedisLeaderboard) getAroundSameRank(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
-	listMemberRankTmp, err := l.getAroundScript.Run(ctx, l.redisClient, []string{l.name}, id, limit, string(order)).Result()
-	if err != nil {
-		return nil, err
+func (l *RedisLeaderboard) getAroundSameRank(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, Cursor, error) {
+	pipeline := l.redisClient.Pipeline()
+	listMemberRankCmd := l.getAroundScript.Run(ctx, pipeline, []string{l.name}, id, limit, string(order))
+
+	rankCmd := pipeline.ZRevRank
+	if order == OrderAsc {
+		rankCmd = pipeline.ZRank
 	}
+	getRankCmd := rankCmd(
+		ctx,
+		generateMemScoreSetName(l.name),
+		fmt.Sprintf("%v", id),
+	)
+
+	if _, err := pipeline.Exec(ctx); err != nil {
+		return nil, Cursor{}, err
+	}
+
+	listMemberRankTmp, _ := listMemberRankCmd.Result()
+	rank, _ := getRankCmd.Result()
+	offset := 0
 
 	listMemberRank := listMemberRankTmp.([]interface{})
 	listMember := make([]*Member, len(listMemberRank)/3)
@@ -235,14 +263,23 @@ func (l *RedisLeaderboard) getAroundSameRank(ctx context.Context, id interface{}
 			listMember[idx/3] = &Member{
 				ID: val,
 			}
+			if val == id {
+				offset = int(rank) - idx/3
+			}
 		}
 	}
 
-	return listMember, nil
+	cursor := Cursor{}
+	if len(listMember) > 0 {
+		cursor.Begin = offset
+		cursor.End = cursor.Begin + len(listMember)
+	}
+
+	return listMember, cursor, nil
 }
 
 // GetAround get list member around another member with limit and order
-func (l *RedisLeaderboard) GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, Cursor, error) {
 	if l.opts.AllowSameRank {
 		return l.getAroundSameRank(ctx, id, limit, order)
 	}

@@ -84,7 +84,7 @@ func getAround(
 	limit int,
 	expected int,
 ) []*Member {
-	list, err := leaderboard.GetAround(ctx, id, limit, OrderDesc)
+	list, _, err := leaderboard.GetAround(ctx, id, limit, OrderDesc)
 	if err != nil {
 		t.Error("failed to get around", err.Error())
 		return nil
@@ -117,7 +117,7 @@ func TestAddMember(t *testing.T) {
 		leaderboard := initLeaderboard(t, ctx, numberOfMember, &tc)
 		defer clean(t, ctx, leaderboard)
 
-		members, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
+		members, _, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
 		if err != nil {
 			t.Error("failed to list members", err.Error())
 			return

@@ -30,11 +30,11 @@ func main() {
 	leaderboard.AddMember(ctx, "P9", 1)
 
 	// list member with rank
-	list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
+	list, _, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
 	Print(list)
 
 	// get around a member
-	list, _ = leaderboard.GetAround(ctx, "P4", 4, goleaderboard.OrderDesc)
+	list, _, _ = leaderboard.GetAround(ctx, "P4", 4, goleaderboard.OrderDesc)
 	Print(list)
 
 	//// change score of member "4"
