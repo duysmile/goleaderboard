@@ -3,6 +3,7 @@ package goleaderboard
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -87,7 +88,24 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	return lb
 }
 
+func (l *RedisLeaderboard) setTTL(ctx context.Context) {
+	if l.opts.LifeTime == 0 {
+		return
+	}
+	ttlDuration := l.opts.LifeTime * time.Second
+	pipeline := l.redisClient.Pipeline()
+	pipeline.Expire(ctx, generateRankSetName(l.name), ttlDuration)
+	if l.opts.AllowSameRank {
+		pipeline.Expire(ctx, generateMemScoreSetName(l.name), ttlDuration)
+	}
+
+	if _, err := pipeline.Exec(ctx); err != nil {
+		log.Println(err)
+	}
+}
+
 func (l *RedisLeaderboard) addMember(ctx context.Context, id interface{}, score int) error {
+	defer l.setTTL(ctx)
 	return l.redisClient.ZAdd(ctx, generateRankSetName(l.name), &redis.Z{
 		Score:  float64(score),
 		Member: id,
@@ -95,6 +113,7 @@ func (l *RedisLeaderboard) addMember(ctx context.Context, id interface{}, score 
 }
 
 func (l *RedisLeaderboard) addMemberSameRank(ctx context.Context, id interface{}, score int) error {
+	defer l.setTTL(ctx)
 	_, err := l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, id, score).Result()
 	return err
 }

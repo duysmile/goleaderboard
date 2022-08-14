@@ -1,3 +1,4 @@
+
 # goleaderboard
 [![From Vietnam with <3](https://raw.githubusercontent.com/webuild-community/badge/master/svg/love.svg)](https://webuild.community)
 [![Go Reference](https://pkg.go.dev/badge/github.com/duysmile/goleaderboard)](https://pkg.go.dev/github.com/duysmile/goleaderboard)
@@ -28,7 +29,10 @@ rdb := redis.NewClient(&redis.Options{
 		Password: "", // no password set
 		DB:       0,  // use default DB
 	})
-leaderboard := goleaderboard.NewLeaderBoard(rdb, "test", nil)
+leaderboard := goleaderboard.NewLeaderBoard(rdb, "test", &goleaderboard.Options{
+	AllowSameRank: false,
+	LifeTime: 0,
+})
 ```
 
 Add a member with `id` and `score`
@@ -44,7 +48,7 @@ fmt.Println("rank of member:", fmt.Sprintf("#%v", rank))
 
 List members by rank
 ```go
-list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
+list, cursor, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
 
 // you can choose the order you want
 // for example: 
@@ -53,7 +57,7 @@ list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
 
 Get around of a member
 ```go
-list, _ = leaderboard.GetAround(ctx, "P4", 4, goleaderboard.OrderDesc)
+list, cursor _ := leaderboard.GetAround(ctx, "P4", 4, goleaderboard.OrderDesc)
 ```
 
 ## Contribution
