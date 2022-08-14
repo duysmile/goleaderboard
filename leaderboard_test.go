@@ -39,8 +39,9 @@ func initLeaderboard(
 	t *testing.T,
 	ctx context.Context,
 	numberOfMember int,
+	opts *Options,
 ) Leaderboard {
-	leaderboard := NewLeaderBoard(redisClient, "test", nil)
+	leaderboard := NewLeaderBoard(redisClient, "test", opts)
 	for i := 0; i < numberOfMember; i++ {
 		id := fmt.Sprintf("P%v", i)
 		addMember(t, ctx, leaderboard, id, numberOfMember-i)
@@ -103,7 +104,7 @@ func TestAddMember(t *testing.T) {
 
 	ctx := context.Background()
 	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember)
+	leaderboard := initLeaderboard(t, ctx, numberOfMember, nil)
 	defer clean(t, ctx, leaderboard)
 
 	members, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
@@ -123,7 +124,7 @@ func TestRankingMember(t *testing.T) {
 
 	ctx := context.Background()
 	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember)
+	leaderboard := initLeaderboard(t, ctx, numberOfMember, nil)
 	defer clean(t, ctx, leaderboard)
 
 	player := "PMax"
@@ -141,7 +142,7 @@ func TestSameRankingMember(t *testing.T) {
 
 	ctx := context.Background()
 	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember)
+	leaderboard := initLeaderboard(t, ctx, numberOfMember, &Options{AllowSameRank: true})
 	defer clean(t, ctx, leaderboard)
 
 	player1 := "PSame1"
@@ -162,13 +163,13 @@ func TestSameRankingMember(t *testing.T) {
 	getRank(t, ctx, leaderboard, player2, 1)
 }
 
-func TestGetAround(t *testing.T) {
+func TestGetAroundSameRank(t *testing.T) {
 	setup(t)
 	defer teardown(t)
 
 	ctx := context.Background()
 	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember)
+	leaderboard := initLeaderboard(t, ctx, numberOfMember, &Options{AllowSameRank: true})
 	defer clean(t, ctx, leaderboard)
 
 	player := "P4"

@@ -81,23 +81,38 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	return lb
 }
 
-// AddMember add a member with score to leaderboard.
-// It will automatically add member to the right position, if member was already in leaderboard, it will update the rank of this one.
-func (l *RedisLeaderboard) AddMember(ctx context.Context, id interface{}, score int) error {
+func (l *RedisLeaderboard) addMember(ctx context.Context, id interface{}, score int) error {
+	return l.redisClient.ZAdd(ctx, generateRankSetName(l.name), &redis.Z{
+		Score:  float64(score),
+		Member: id,
+	}).Err()
+}
+
+func (l *RedisLeaderboard) addMemberSameRank(ctx context.Context, id interface{}, score int) error {
 	_, err := l.addMemberScript.Run(ctx, l.redisClient, []string{l.name}, id, score).Result()
 	return err
 }
 
-func (l *RedisLeaderboard) _List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+// AddMember add a member with score to leaderboard.
+// It will automatically add member to the right position, if member was already in leaderboard, it will update the rank of this one.
+func (l *RedisLeaderboard) AddMember(ctx context.Context, id interface{}, score int) error {
+	if l.opts.AllowSameRank {
+		return l.addMemberSameRank(ctx, id, score)
+	}
+
+	return l.addMember(ctx, id, score)
+}
+
+func (l *RedisLeaderboard) listMember(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
 	cmd := l.redisClient.ZRevRangeWithScores
 	if order == OrderAsc {
 		cmd = l.redisClient.ZRangeWithScores
 	}
 	listMemberRedis, err := cmd(
 		ctx,
-		generateMemScoreSetName(l.name),
+		generateRankSetName(l.name),
 		int64(offset),
-		int64(offset+limit),
+		int64(offset+limit-1),
 	).Result()
 
 	if err != nil {
@@ -106,18 +121,18 @@ func (l *RedisLeaderboard) _List(ctx context.Context, offset, limit int, order O
 
 	pipeline := l.redisClient.Pipeline()
 
-	uniqueScores := make(map[float64]*redis.IntCmd)
+	uniqueScores := make(map[interface{}]*redis.IntCmd)
 	for _, member := range listMemberRedis {
-		if _, ok := uniqueScores[member.Score]; ok {
+		if _, ok := uniqueScores[member.Member]; ok {
 			continue
 		}
 
 		rankCmd := pipeline.ZRevRank(
 			ctx,
 			generateRankSetName(l.name),
-			fmt.Sprintf("%v", member.Score),
+			fmt.Sprintf("%v", member.Member),
 		)
-		uniqueScores[member.Score] = rankCmd
+		uniqueScores[member.Member] = rankCmd
 	}
 
 	if _, err := pipeline.Exec(ctx); err != nil {
@@ -129,7 +144,7 @@ func (l *RedisLeaderboard) _List(ctx context.Context, offset, limit int, order O
 		mem := &Member{
 			ID:    member.Member,
 			Score: int(member.Score),
-			Rank:  int(uniqueScores[member.Score].Val()) + 1,
+			Rank:  int(uniqueScores[member.Member].Val()) + 1,
 		}
 		listMember = append(listMember, mem)
 	}
@@ -137,8 +152,7 @@ func (l *RedisLeaderboard) _List(ctx context.Context, offset, limit int, order O
 	return listMember, nil
 }
 
-// List get list member with offset, limit and order in leaderboard
-func (l *RedisLeaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) listMemberSameRank(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
 	listMemberRankTmp, err := l.listMemberScript.Run(ctx, l.redisClient, []string{l.name}, offset, limit, string(order)).Result()
 	if err != nil {
 		return nil, err
@@ -157,18 +171,26 @@ func (l *RedisLeaderboard) List(ctx context.Context, offset, limit int, order Or
 			}
 		}
 	}
-
 	return listMember, nil
 }
 
-func (l *RedisLeaderboard) _GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
+// List get list member with offset, limit and order in leaderboard
+func (l *RedisLeaderboard) List(ctx context.Context, offset, limit int, order Order) ([]*Member, error) {
+	if l.opts.AllowSameRank {
+		return l.listMemberSameRank(ctx, offset, limit, order)
+	}
+
+	return l.listMember(ctx, offset, limit, order)
+}
+
+func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
 	rankCmd := l.redisClient.ZRevRank
 	if order == OrderAsc {
 		rankCmd = l.redisClient.ZRank
 	}
 	rank, err := rankCmd(
 		ctx,
-		generateMemScoreSetName(l.name),
+		generateRankSetName(l.name),
 		fmt.Sprintf("%v", id),
 	).Result()
 
@@ -178,7 +200,7 @@ func (l *RedisLeaderboard) _GetAround(ctx context.Context, id interface{}, limit
 
 	total, err := l.redisClient.ZCount(
 		ctx,
-		generateMemScoreSetName(l.name),
+		generateRankSetName(l.name),
 		"-inf",
 		"+inf",
 	).Result()
@@ -196,8 +218,7 @@ func (l *RedisLeaderboard) _GetAround(ctx context.Context, id interface{}, limit
 	return l.List(ctx, start, limit, order)
 }
 
-// GetAround get list member around another member with limit and order
-func (l *RedisLeaderboard) GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
+func (l *RedisLeaderboard) getAroundSameRank(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
 	listMemberRankTmp, err := l.getAroundScript.Run(ctx, l.redisClient, []string{l.name}, id, limit, string(order)).Result()
 	if err != nil {
 		return nil, err
@@ -220,21 +241,20 @@ func (l *RedisLeaderboard) GetAround(ctx context.Context, id interface{}, limit 
 	return listMember, nil
 }
 
-func (l *RedisLeaderboard) _GetRank(ctx context.Context, id interface{}) (int, error) {
-	score, err := l.redisClient.ZScore(
-		ctx,
-		generateMemScoreSetName(l.name),
-		fmt.Sprintf("%s", id),
-	).Result()
-
-	if err != nil {
-		return 0, err
+// GetAround get list member around another member with limit and order
+func (l *RedisLeaderboard) GetAround(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, error) {
+	if l.opts.AllowSameRank {
+		return l.getAroundSameRank(ctx, id, limit, order)
 	}
 
+	return l.getAround(ctx, id, limit, order)
+}
+
+func (l *RedisLeaderboard) getRank(ctx context.Context, id interface{}) (int, error) {
 	rank, err := l.redisClient.ZRevRank(
 		ctx,
 		generateRankSetName(l.name),
-		fmt.Sprintf("%v", score),
+		fmt.Sprintf("%v", id),
 	).Result()
 
 	if err != nil {
@@ -244,8 +264,7 @@ func (l *RedisLeaderboard) _GetRank(ctx context.Context, id interface{}) (int, e
 	return int(rank) + 1, nil
 }
 
-// GetRank get rank of a member
-func (l *RedisLeaderboard) GetRank(ctx context.Context, id interface{}) (int, error) {
+func (l *RedisLeaderboard) getRankSameRank(ctx context.Context, id interface{}) (int, error) {
 	rankData, err := l.getRankScript.Run(ctx, l.redisClient, []string{l.name}, id).Result()
 	if err != nil {
 		return 0, nil
@@ -253,6 +272,15 @@ func (l *RedisLeaderboard) GetRank(ctx context.Context, id interface{}) (int, er
 
 	rank := rankData.(int64)
 	return int(rank), nil
+}
+
+// GetRank get rank of a member
+func (l *RedisLeaderboard) GetRank(ctx context.Context, id interface{}) (int, error) {
+	if l.opts.AllowSameRank {
+		return l.getRankSameRank(ctx, id)
+	}
+
+	return l.getRank(ctx, id)
 }
 
 // Clean clear all data of leaderboard in redis
