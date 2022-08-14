@@ -102,19 +102,32 @@ func TestAddMember(t *testing.T) {
 	setup(t)
 	defer teardown(t)
 
-	ctx := context.Background()
-	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember, nil)
-	defer clean(t, ctx, leaderboard)
-
-	members, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
-	if err != nil {
-		t.Error("failed to list members", err.Error())
-		return
+	testCases := []Options{
+		{
+			AllowSameRank: false,
+		},
+		{
+			AllowSameRank: true,
+		},
 	}
 
-	if len(members) != numberOfMember {
-		t.Errorf("something went wrong when add member\nExpected: adding %v members\nReceived: adding %v members", numberOfMember, len(members))
+	for _, tc := range testCases {
+		ctx := context.Background()
+		numberOfMember := 10
+		leaderboard := initLeaderboard(t, ctx, numberOfMember, &tc)
+		defer clean(t, ctx, leaderboard)
+
+		members, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
+		if err != nil {
+			t.Error("failed to list members", err.Error())
+			return
+		}
+
+		if len(members) != numberOfMember {
+			t.Errorf("something went wrong when add member\nExpected: adding %v members\nReceived: adding %v members", numberOfMember, len(members))
+		}
+
+		clean(t, ctx, leaderboard)
 	}
 }
 
@@ -122,18 +135,30 @@ func TestRankingMember(t *testing.T) {
 	setup(t)
 	defer teardown(t)
 
-	ctx := context.Background()
-	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember, nil)
-	defer clean(t, ctx, leaderboard)
+	testCases := []Options{
+		{
+			AllowSameRank: false,
+		},
+		{
+			AllowSameRank: true,
+		},
+	}
 
-	player := "PMax"
-	addMember(t, ctx, leaderboard, player, 100)
-	getRank(t, ctx, leaderboard, player, 1)
+	for _, tc := range testCases {
+		ctx := context.Background()
+		numberOfMember := 10
+		leaderboard := initLeaderboard(t, ctx, numberOfMember, &tc)
+		defer clean(t, ctx, leaderboard)
 
-	playerMaxMax := "PMaxMax"
-	addMember(t, ctx, leaderboard, playerMaxMax, 1000)
-	getRank(t, ctx, leaderboard, player, 2)
+		player := "PMax"
+		addMember(t, ctx, leaderboard, player, 100)
+		getRank(t, ctx, leaderboard, player, 1)
+
+		playerMaxMax := "PMaxMax"
+		addMember(t, ctx, leaderboard, playerMaxMax, 1000)
+		getRank(t, ctx, leaderboard, player, 2)
+		clean(t, ctx, leaderboard)
+	}
 }
 
 func TestSameRankingMember(t *testing.T) {
@@ -163,41 +188,53 @@ func TestSameRankingMember(t *testing.T) {
 	getRank(t, ctx, leaderboard, player2, 1)
 }
 
-func TestGetAroundSameRank(t *testing.T) {
+func TestGetAround(t *testing.T) {
 	setup(t)
 	defer teardown(t)
 
-	ctx := context.Background()
-	numberOfMember := 10
-	leaderboard := initLeaderboard(t, ctx, numberOfMember, &Options{AllowSameRank: true})
-	defer clean(t, ctx, leaderboard)
-
-	player := "P4"
-	limit := 1
-	list := getAround(t, ctx, leaderboard, player, limit, limit)
-	if list != nil && list[0].ID != player {
-		t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[0].ID)
-		return
+	testCases := []Options{
+		{
+			AllowSameRank: false,
+		},
+		{
+			AllowSameRank: true,
+		},
 	}
 
-	limit = 6
-	list = getAround(t, ctx, leaderboard, player, limit, limit)
-	if list != nil && list[limit/2].ID != player {
-		t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[limit/2].ID)
-		return
-	}
+	for _, tc := range testCases {
+		ctx := context.Background()
+		numberOfMember := 10
+		leaderboard := initLeaderboard(t, ctx, numberOfMember, &tc)
+		defer clean(t, ctx, leaderboard)
 
-	player = "P0"
-	list = getAround(t, ctx, leaderboard, player, limit, limit)
-	if list != nil && list[0].ID != player {
-		t.Errorf("Error in get around of member with player in top 1\nExpected: player %v\nReceived: player %v", player, list[0].ID)
-		return
-	}
+		player := "P4"
+		limit := 1
+		list := getAround(t, ctx, leaderboard, player, limit, limit)
+		if list != nil && list[0].ID != player {
+			t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[0].ID)
+			return
+		}
 
-	player = "P9"
-	list = getAround(t, ctx, leaderboard, player, limit, limit)
-	if list != nil && list[limit-1].ID != player {
-		t.Errorf("Error in get around of member with player in top 10\nExpected: player %v\nReceived: player %v", player, list[limit-1].ID)
-		return
+		limit = 6
+		list = getAround(t, ctx, leaderboard, player, limit, limit)
+		if list != nil && list[limit/2].ID != player {
+			t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[limit/2].ID)
+			return
+		}
+
+		player = "P0"
+		list = getAround(t, ctx, leaderboard, player, limit, limit)
+		if list != nil && list[0].ID != player {
+			t.Errorf("Error in get around of member with player in top 1\nExpected: player %v\nReceived: player %v", player, list[0].ID)
+			return
+		}
+
+		player = "P9"
+		list = getAround(t, ctx, leaderboard, player, limit, limit)
+		if list != nil && list[limit-1].ID != player {
+			t.Errorf("Error in get around of member with player in top 10\nExpected: player %v\nReceived: player %v", player, list[limit-1].ID)
+			return
+		}
+		clean(t, ctx, leaderboard)
 	}
 }
