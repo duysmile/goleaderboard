@@ -83,19 +83,19 @@ func getAround(
 	id interface{},
 	limit int,
 	expected int,
-) []*Member {
-	list, _, err := leaderboard.GetAround(ctx, id, limit, OrderDesc)
+) ([]*Member, Cursor) {
+	list, cursor, err := leaderboard.GetAround(ctx, id, limit, OrderDesc)
 	if err != nil {
 		t.Error("failed to get around", err.Error())
-		return nil
+		return nil, Cursor{}
 	}
 
 	if len(list) != expected {
 		t.Errorf("Error in get around\nExpected: %v\nReceived: %v", limit, len(list))
-		return nil
+		return nil, Cursor{}
 	}
 
-	return list
+	return list, cursor
 }
 
 func TestAddMember(t *testing.T) {
@@ -117,10 +117,18 @@ func TestAddMember(t *testing.T) {
 		leaderboard := initLeaderboard(t, ctx, numberOfMember, &tc)
 		defer clean(t, ctx, leaderboard)
 
-		members, _, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
+		members, cursor, err := leaderboard.List(ctx, 0, numberOfMember, OrderDesc)
 		if err != nil {
 			t.Error("failed to list members", err.Error())
 			return
+		}
+
+		if cursor.Begin != 0 {
+			t.Errorf("something went wrong when list member\nExpected: cursor begins at %v\nReceived: cursor begins at %v", cursor.Begin, 0)
+		}
+
+		if cursor.End != numberOfMember {
+			t.Errorf("something went wrong when list member\nExpected: cursor ends at %v\nReceived: cursor ends at %v", cursor.End, numberOfMember)
 		}
 
 		if len(members) != numberOfMember {
@@ -209,28 +217,28 @@ func TestGetAround(t *testing.T) {
 
 		player := "P4"
 		limit := 1
-		list := getAround(t, ctx, leaderboard, player, limit, limit)
+		list, _ := getAround(t, ctx, leaderboard, player, limit, limit)
 		if list != nil && list[0].ID != player {
 			t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[0].ID)
 			return
 		}
 
 		limit = 6
-		list = getAround(t, ctx, leaderboard, player, limit, limit)
+		list, _ = getAround(t, ctx, leaderboard, player, limit, limit)
 		if list != nil && list[limit/2].ID != player {
 			t.Errorf("Error in get around of member with limit %v\nExpected: player %v\nReceived: player %v", limit, player, list[limit/2].ID)
 			return
 		}
 
 		player = "P0"
-		list = getAround(t, ctx, leaderboard, player, limit, limit)
+		list, _ = getAround(t, ctx, leaderboard, player, limit, limit)
 		if list != nil && list[0].ID != player {
 			t.Errorf("Error in get around of member with player in top 1\nExpected: player %v\nReceived: player %v", player, list[0].ID)
 			return
 		}
 
 		player = "P9"
-		list = getAround(t, ctx, leaderboard, player, limit, limit)
+		list, _ = getAround(t, ctx, leaderboard, player, limit, limit)
 		if list != nil && list[limit-1].ID != player {
 			t.Errorf("Error in get around of member with player in top 10\nExpected: player %v\nReceived: player %v", player, list[limit-1].ID)
 			return

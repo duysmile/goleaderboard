@@ -80,10 +80,10 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 		opts:           opts,
 	}
 
-	lb.addMemberScript = initAddMemberScript()
-	lb.listMemberScript = initGetListMemberWithRankScript()
-	lb.getRankScript = initGetRankScript()
-	lb.getAroundScript = initGetAroundScript()
+	lb.addMemberScript = redis.NewScript(initAddMemberScript())
+	lb.listMemberScript = redis.NewScript(initGetListMemberWithRankScript())
+	lb.getRankScript = redis.NewScript(initGetRankScript())
+	lb.getAroundScript = redis.NewScript(initGetAroundScript())
 
 	return lb
 }
@@ -251,7 +251,7 @@ func (l *RedisLeaderboard) getAround(ctx context.Context, id interface{}, limit 
 
 func (l *RedisLeaderboard) getAroundSameRank(ctx context.Context, id interface{}, limit int, order Order) ([]*Member, Cursor, error) {
 	pipeline := l.redisClient.Pipeline()
-	listMemberRankCmd := l.getAroundScript.Run(ctx, pipeline, []string{l.name}, id, limit, string(order))
+	listMemberRankCmd := pipeline.EvalSha(ctx, l.getAroundScript.Hash(), []string{l.name}, id, limit, string(order))
 
 	rankCmd := pipeline.ZRevRank
 	if order == OrderAsc {
@@ -349,8 +349,8 @@ func (l *RedisLeaderboard) Clean(ctx context.Context) error {
 	return err
 }
 
-func initAddMemberScript() *redis.Script {
-	return redis.NewScript(`
+func initAddMemberScript() string {
+	return `
 local key = KEYS[1]
 local member_id = ARGV[1]
 local new_score = ARGV[2]
@@ -373,11 +373,11 @@ if count_member_in_old_score == 0 then
 end
 
 return 1
-`)
+`
 }
 
-func initGetListMemberWithRankScript() *redis.Script {
-	return redis.NewScript(`
+func initGetListMemberWithRankScript() string {
+	return `
 local key = KEYS[1]
 local offset = ARGV[1]
 local limit = ARGV[2]
@@ -405,11 +405,11 @@ for idx,val in ipairs(list_member_with_score) do
 end
 
 return list_member_with_rank
-`)
+`
 }
 
-func initGetRankScript() *redis.Script {
-	return redis.NewScript(`
+func initGetRankScript() string {
+	return `
 local key = KEYS[1]
 local id = ARGV[1]
 
@@ -424,11 +424,11 @@ if not rank then
 end
 
 return rank + 1
-`)
+`
 }
 
-func initGetAroundScript() *redis.Script {
-	return redis.NewScript(`
+func initGetAroundScript() string {
+	return `
 local key = KEYS[1]
 local id = ARGV[1]
 local limit = ARGV[2]
@@ -477,7 +477,7 @@ for idx,val in ipairs(list_member_with_score) do
 end
 
 return list_member_with_rank
-`)
+`
 }
 
 func generateRankSetName(name string) string {
