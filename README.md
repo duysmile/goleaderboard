@@ -52,7 +52,7 @@ list, cursor, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderDesc)
 
 // you can choose the order you want
 // for example: 
-// list, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderAsc)
+// list, cursor, _ := leaderboard.List(ctx, 0, 10, goleaderboard.OrderAsc)
 ```
 
 Get around of a member
