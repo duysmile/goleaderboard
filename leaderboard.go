@@ -13,7 +13,7 @@ import (
 // Options contains all configs for leaderboard
 type Options struct {
 	AllowSameRank bool
-	LifeTime      time.Duration
+	LifeTimeSec   int
 }
 
 // Order is the way to sort leaderboard.
@@ -66,7 +66,7 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 	if opts == nil {
 		opts = &Options{
 			AllowSameRank: false,
-			LifeTime:      1 * time.Hour,
+			LifeTimeSec:   3600,
 		}
 	}
 	rankSet := generateRankSetName(name)
@@ -89,10 +89,10 @@ func NewLeaderBoard(redisClient *redis.Client, name string, opts *Options) Leade
 }
 
 func (l *RedisLeaderboard) setTTL(ctx context.Context) {
-	if l.opts.LifeTime == 0 {
+	if l.opts.LifeTimeSec == 0 {
 		return
 	}
-	ttlDuration := l.opts.LifeTime * time.Second
+	ttlDuration := time.Duration(l.opts.LifeTimeSec) * time.Second
 	pipeline := l.redisClient.Pipeline()
 	pipeline.Expire(ctx, generateRankSetName(l.name), ttlDuration)
 	if l.opts.AllowSameRank {
@@ -363,13 +363,11 @@ local old_score = redis.call("ZSCORE", member_score_set, member_id)
 redis.call("ZADD", rank_set, new_score, new_score)
 redis.call("ZADD", member_score_set, new_score, member_id)
 
-if old_score ~= nil then
-	return 1
-end
-
-local count_member_in_old_score = redis.call("ZCOUNT", member_score_set, old_score, old_score)
-if count_member_in_old_score == 0 then
-	redis.call("ZREM", rank_set, old_score)
+if old_score then
+    local count_member_in_old_score = redis.call("ZCOUNT", member_score_set, old_score, old_score)
+    if count_member_in_old_score == 0 then
+        redis.call("ZREM", rank_set, old_score)
+    end
 end
 
 return 1
