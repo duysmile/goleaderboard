@@ -30,8 +30,8 @@ rdb := redis.NewClient(&redis.Options{
 		DB:       0,  // use default DB
 	})
 leaderboard := goleaderboard.NewLeaderBoard(rdb, "test", &goleaderboard.Options{
-	AllowSameRank: false,
-	LifeTime: 0,
+        AllowSameRank: false,
+        LifeTimeSec: 0,
 })
 ```
 
