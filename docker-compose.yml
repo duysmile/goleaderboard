@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+  example:
+    image: golang:1.17-alpine
+    working_dir: /app
+    command: go run examples/main.go
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+
+volumes:
+  redis-data:

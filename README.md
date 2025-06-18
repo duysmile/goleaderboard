@@ -59,6 +59,13 @@ Get around of a member
 ```go
 list, cursor _ := leaderboard.GetAround(ctx, "P4", 4, goleaderboard.OrderDesc)
 ```
+## Docker Compose
+To start Redis and run the example app use:
+```bash
+docker compose up
+```
+This starts a Redis container and executes `go run examples/main.go`.
+
 
 ## Contribution
 All your contributions to project and make it better, they are welcome. Feel free to start an [issue](https://github.com/duysmile/goleaderboard/issues).
