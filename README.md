@@ -66,6 +66,14 @@ docker compose up
 ```
 This starts a Redis container and executes `go run examples/main.go`.
 
+## Running Benchmarks
+Ensure Redis is running (you can use the Compose file above) and then execute:
+```bash
+go test -bench=. -benchmem
+```
+The benchmarks in `benchmark_test.go` measure adding members and getting
+surrounding ranks.
+
 
 ## Contribution
 All your contributions to project and make it better, they are welcome. Feel free to start an [issue](https://github.com/duysmile/goleaderboard/issues).
